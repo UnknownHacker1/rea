@@ -23,6 +23,7 @@ type Session = ElectronProtocolFinding["session"];
 
 /** Electron's `CustomScheme` privileges for `protocol.registerSchemesAsPrivileged`. */
 const PRIVILEGE_NAMES = [
+  "allowExtensions",
   "allowServiceWorkers",
   "bypassCSP",
   "codeCache",
@@ -130,6 +131,10 @@ const inspectPrivilegedSchemes = (
   const list = typeless(argumentNode(node.arguments[0]));
   // Electron converts the argument to `CustomScheme[]`; other syntax registers nothing.
   if (isKnownNonArray(list)) return;
+  // Electron converts every entry or throws, so one entry that cannot be a
+  // `CustomScheme` means the call registers nothing.
+  if (t.isArrayExpression(list) && list.elements.some(isKnownInvalidEntry))
+    return;
   const entries = t.isArrayExpression(list) ? list.elements : [list];
   for (const [index, entry] of entries.entries()) {
     const candidate = typeless(entry ?? undefined);
@@ -138,15 +143,8 @@ const inspectPrivilegedSchemes = (
       "scheme",
       isNullishJavaScriptSyntax,
     );
-    // A hole or an object without `scheme` names no scheme at all.
-    if (
-      candidate === undefined ||
-      (t.isObjectExpression(candidate) && scheme.status === "missing")
-    )
-      continue;
     addProtocol(context, {
       node,
-      // Each present entry keeps its own range; holes share the call's.
       located: candidate ?? node,
       entry: index,
       api: "registerSchemesAsPrivileged",
@@ -164,9 +162,38 @@ const isKnownNonArray = (node: t.Node | undefined): boolean =>
   t.isFunction(node) ||
   t.isClassExpression(node);
 
+/** A hole, non-object syntax, or an object whose `scheme` is known absent. */
+const isKnownInvalidEntry = (
+  entry: t.ArrayExpression["elements"][number],
+): boolean => {
+  if (entry === null) return true;
+  // A spread can contribute any entries at runtime.
+  if (t.isSpreadElement(entry)) return false;
+  const candidate = typeless(entry);
+  if (
+    t.isLiteral(candidate) ||
+    t.isArrayExpression(candidate) ||
+    t.isFunction(candidate) ||
+    t.isClassExpression(candidate)
+  )
+    return true;
+  if (!t.isObjectExpression(candidate)) return false;
+  const scheme = staticObjectProperty(
+    candidate,
+    "scheme",
+    isNullishJavaScriptSyntax,
+  );
+  return (
+    scheme.status === "missing" ||
+    (scheme.status === "explicit" &&
+      isNullishJavaScriptSyntax(typeless(scheme.value) ?? scheme.value))
+  );
+};
+
 /**
  * Privilege keys whose effective (last) value is literal `true`; null when the
- * object is not a literal with static keys. A later key wins, as at runtime.
+ * object is not a literal with static keys or a privilege value is not a
+ * boolean literal. A later key wins, as at runtime.
  */
 const enabledPrivileges = (
   entry: t.Node | undefined,
@@ -200,9 +227,12 @@ const enabledPrivileges = (
       return null;
     }
     const value = typeless(lookup.value);
-    if (t.isBooleanLiteral(value, { value: true })) enabled.push(name);
-    else if (!t.isBooleanLiteral(value))
+    // An unknown value may enable the privilege, so the set is unknown.
+    if (!t.isBooleanLiteral(value)) {
       context.accumulator.unknownFindings += 1;
+      return null;
+    }
+    if (value.value) enabled.push(name);
   }
   return enabled.toSorted();
 };

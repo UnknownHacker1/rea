@@ -209,6 +209,7 @@ describe("Electron privileged scheme spreads", () => {
       ["secure"],
     ],
     ["a nullish spread", "{ secure: true, ...null, ...void 0 }", ["secure"]],
+    ["allowExtensions", "{ allowExtensions: true }", ["allowExtensions"]],
     [
       "a key that is not an Electron privilege",
       "{ secure: true, notAPrivilege: true }",
@@ -220,6 +221,10 @@ describe("Electron privileged scheme spreads", () => {
 
   it.each([
     ["a spread of an unknown value", "{ ...options, secure: true }"],
+    [
+      "a privilege with an unknown value",
+      "{ secure: true, bypassCSP: config.allow }",
+    ],
     [
       "a spread containing a getter",
       "{ ...{ get secure() { return true; } } }",
@@ -241,17 +246,31 @@ describe("Electron protocol registrations without a scheme", () => {
     ).toEqual([]);
   });
 
-  it("skips holes and entries without a scheme but keeps the rest", () => {
+  it.each([
+    ["a hole", ","],
+    ["an entry without a scheme", "{ privileges: { secure: true } },"],
+    ["an entry with a null scheme", "{ scheme: null },"],
+    ["a string entry", '"other",'],
+  ])("records nothing for a list with %s", (_name, invalid) => {
+    // Electron converts the whole list or throws before registering anything.
     expect(
       protocolsOf(`
         const { protocol } = require("electron");
-        protocol.registerSchemesAsPrivileged([
-          ,
-          { privileges: { secure: true } },
-          { scheme: "app" },
-        ]);
+        protocol.registerSchemesAsPrivileged([${invalid} { scheme: "app" }]);
       `),
-    ).toMatchObject([{ scheme: literal("app") }]);
+    ).toEqual([]);
+  });
+
+  it("keeps entries next to a spread, which can supply any entries", () => {
+    expect(
+      protocolsOf(`
+        const { protocol } = require("electron");
+        protocol.registerSchemesAsPrivileged([...base, { scheme: "app" }]);
+      `),
+    ).toMatchObject([
+      { scheme: { status: "dynamic" } },
+      { scheme: literal("app") },
+    ]);
   });
 });
 
