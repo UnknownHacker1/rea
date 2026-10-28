@@ -254,3 +254,48 @@ describe("Electron protocol registrations without a scheme", () => {
     ).toMatchObject([{ scheme: literal("app") }]);
   });
 });
+
+describe("Electron protocol calls that register nothing", () => {
+  it.each([
+    ["a handler without a callback", 'protocol.handle("app");'],
+    ["a handler with a null callback", 'protocol.handle("app", null);'],
+    [
+      "an interceptor without a callback",
+      'protocol.interceptHttpProtocol("https");',
+    ],
+    [
+      "a privileged scheme object outside an array",
+      'protocol.registerSchemesAsPrivileged({ scheme: "app" });',
+    ],
+    [
+      "a privileged scheme string outside an array",
+      'protocol.registerSchemesAsPrivileged("app");',
+    ],
+  ])("ignores %s", (_name, call) => {
+    expect(
+      protocolsOf(`const { protocol } = require("electron"); ${call}`),
+    ).toEqual([]);
+  });
+
+  it("keeps a handler whose callback may come from a spread", () => {
+    expect(
+      protocolsOf(`
+        const { protocol } = require("electron");
+        protocol.handle("app", ...rest);
+      `),
+    ).toMatchObject([{ role: "handler", scheme: literal("app") }]);
+  });
+
+  it("reads privileges past a nullish spread in the entry", () => {
+    expect(
+      protocolsOf(`
+        const { protocol } = require("electron");
+        protocol.registerSchemesAsPrivileged([
+          { scheme: "app", privileges: { secure: true }, ...null, ...void 0 },
+        ]);
+      `),
+    ).toMatchObject([
+      { scheme: literal("app"), enabled_privileges: ["secure"] },
+    ]);
+  });
+});

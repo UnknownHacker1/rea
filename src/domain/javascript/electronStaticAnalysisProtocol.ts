@@ -83,7 +83,7 @@ export const inspectElectronProtocolNode = (
     : INTERCEPTORS.has(target.api)
       ? "interceptor"
       : undefined;
-  if (role !== undefined)
+  if (role !== undefined && !handlerKnownMissing(node))
     addProtocol(context, {
       node,
       api: target.api,
@@ -91,6 +91,17 @@ export const inspectElectronProtocolNode = (
       session: target.session,
       scheme: argumentNode(node.arguments[0]),
     });
+};
+
+/** Electron requires the callback, so a call without one installs nothing. */
+const handlerKnownMissing = (
+  node: t.CallExpression | t.OptionalCallExpression,
+): boolean => {
+  // A spread can supply the callback at runtime.
+  if (node.arguments.slice(0, 2).some((value) => t.isSpreadElement(value)))
+    return false;
+  const handler = typeless(argumentNode(node.arguments[1]));
+  return handler === undefined || isNullishJavaScriptSyntax(handler);
 };
 
 const protocolTarget = (
@@ -117,6 +128,8 @@ const inspectPrivilegedSchemes = (
 ): void => {
   // TypeScript assertions such as `[...] as const` do not change the value.
   const list = typeless(argumentNode(node.arguments[0]));
+  // Electron converts the argument to `CustomScheme[]`; other syntax registers nothing.
+  if (isKnownNonArray(list)) return;
   const entries = t.isArrayExpression(list) ? list.elements : [list];
   for (const [index, entry] of entries.entries()) {
     const candidate = typeless(entry ?? undefined);
@@ -145,6 +158,12 @@ const inspectPrivilegedSchemes = (
   }
 };
 
+const isKnownNonArray = (node: t.Node | undefined): boolean =>
+  t.isObjectExpression(node) ||
+  t.isLiteral(node) ||
+  t.isFunction(node) ||
+  t.isClassExpression(node);
+
 /**
  * Privilege keys whose effective (last) value is literal `true`; null when the
  * object is not a literal with static keys. A later key wins, as at runtime.
@@ -153,7 +172,11 @@ const enabledPrivileges = (
   entry: t.Node | undefined,
   context: JavaScriptFindingContext,
 ): readonly string[] | null => {
-  const lookup = staticObjectProperty(entry, "privileges");
+  const lookup = staticObjectProperty(
+    entry,
+    "privileges",
+    isNullishJavaScriptSyntax,
+  );
   if (lookup.status === "missing") return [];
   const privileges =
     lookup.status === "explicit" ? typeless(lookup.value) : undefined;
