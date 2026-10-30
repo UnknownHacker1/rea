@@ -214,9 +214,9 @@ export interface ElectronNativeAddonBindingFinding {
 }
 
 /**
- * One custom URL scheme registration visible at an Electron `app` or
- * `protocol` call site. Registration shows a reachable entry point, not
- * that the operating system or a session currently routes the scheme here.
+ * One custom URL scheme registration call observed at an Electron `app` or
+ * `protocol` call site. Successful registration, control-flow reachability
+ * and operating-system or session routing remain unproven.
  */
 export interface ElectronProtocolFinding {
   /** The exact Electron member called. */
