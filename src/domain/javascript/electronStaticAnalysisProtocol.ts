@@ -1,5 +1,6 @@
 import * as t from "@babel/types";
 
+import { compositeKey } from "../unicodeCodePointOrder.js";
 import type {
   ElectronProtocolFinding,
   ElectronStaticValue,
@@ -273,7 +274,7 @@ const addProtocol = (
   };
   addLocatedFinding(context, {
     collection: context.accumulator.protocols,
-    key: `electron-protocol\0${input.api}\0${String(input.entry ?? "")}`,
+    key: compositeKey(["electron-protocol", input.api, input.entry ?? null]),
     node: located,
     value: finding,
   });
